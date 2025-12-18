@@ -5,8 +5,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
-# We try to import webdriver_manager for local laptop use
-# If it fails (on some servers), we just skip it
+# Try to import manager for local use
 try:
     from webdriver_manager.chrome import ChromeDriverManager
     HAS_MANAGER = True
@@ -14,50 +13,47 @@ except ImportError:
     HAS_MANAGER = False
 
 def run_scout():
-    print("Starting Scout Robot (Hybrid Mode)...")
+    print("Starting Scout Robot (Diagnostic Mode)...")
     
-    # 1. Setup Headless Options (Required for Cloud)
+    # 1. Setup Headless Options
     options = Options()
     options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+    # New Trick: specific headers to look more human
+    options.add_argument("--accept-lang=en-US,en;q=0.9")
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36")
 
-    # 2. INTELLIGENT DRIVER SELECTION
-    # Check if we are on the Cloud Server (Linux) where the driver is pre-installed
+    # 2. Driver Selection (Cloud vs Local)
     cloud_driver_path = "/usr/bin/chromedriver"
-    
     if os.path.exists(cloud_driver_path):
-        print(f"Cloud Environment Detected. Using system driver: {cloud_driver_path}")
         service = Service(cloud_driver_path)
     elif HAS_MANAGER:
-        print("Local Environment Detected. Downloading matching driver...")
         service = Service(ChromeDriverManager().install())
     else:
-        print("Critical Error: No driver found and manager not available.")
-        return []
+        return [{"name": "Error: Driver not found", "link": "#"}]
 
+    driver = None
     try:
         driver = webdriver.Chrome(service=service, options=options)
-    except Exception as e:
-        print(f"Driver Crash: {e}")
-        return []
-
-    found_tourneys = []
-
-    try:
-        # 3. Go DIRECTLY to your filtered search URL
+        
+        # 3. Target URL
         url = "https://pickleballtournaments.com/search?show_all=true&zoom_level=7&current_page=1&tournament_filter=local"
-        print(f"Navigating to: {url}")
         driver.get(url)
         
-        # 4. Wait for results (8 seconds)
-        time.sleep(8) 
+        # 4. Scroll to trigger content loading
+        time.sleep(3)
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(5) 
 
-        # 5. Scan for Links
-        print("Scanning page...")
+        # 5. DIAGNOSTIC: Check what page we are actually on
+        page_title = driver.title
+        print(f"Robot sees page title: {page_title}")
+
+        # 6. Scrape Links
+        found_tourneys = []
         all_links = driver.find_elements(By.TAG_NAME, "a")
         
         for link in all_links:
@@ -65,34 +61,37 @@ def run_scout():
                 href = link.get_attribute("href")
                 text = link.text.strip()
                 
-                # Filter for valid tournament details
-                if href and "tournament/detail" in href:
+                # Loose filter: Just look for 'tournament' or 'event' keyword
+                if href and ("tournament" in href or "event" in href):
                     if len(text) > 3:
                         if not any(t['link'] == href for t in found_tourneys):
-                            name = text.split('\n')[0]
                             found_tourneys.append({
-                                "name": name,
+                                "name": text.split('\n')[0],
                                 "link": href,
-                                "date": "Check Link", 
-                                "location": "Local Search"
+                                "location": "Scouted Result",
+                                "date": "See Link"
                             })
             except:
                 continue
-
-        print(f"Success: Found {len(found_tourneys)} tournaments.")
-        return found_tourneys
+        
+        # 7. RESULTS LOGIC
+        if len(found_tourneys) > 0:
+            return found_tourneys
+        else:
+            # If empty, return the DIAGNOSTIC info so we know why!
+            return [{
+                "name": f"⚠️ Robot Blocked. Page Title: '{page_title}'", 
+                "link": url,
+                "location": "Debug Info",
+                "date": "Error"
+            }]
 
     except Exception as e:
-        print(f"Scout Logic Error: {e}")
-        return []
+        return [{"name": f"Error: {str(e)}", "link": "#"}]
     
     finally:
-        try:
+        if driver:
             driver.quit()
-        except:
-            pass
 
 if __name__ == "__main__":
-    results = run_scout()
-    for r in results:
-        print(f"- {r['name']}")
+    print(run_scout())
