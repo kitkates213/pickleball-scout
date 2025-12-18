@@ -6,79 +6,61 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
 def run_scout():
-    print("Starting Scout Robot...")
+    print("Starting Scout Robot (Direct Link Mode)...")
     
-    # 1. Setup Headless Chrome (Invisible)
+    # 1. Setup Invisible Chrome
     options = Options()
     options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    # This 'user-agent' trick makes the website think we are a real laptop, not a robot
+    options.add_argument("--window-size=1920,1080")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    found_tourneys = []
 
     try:
-        # 2. Go DIRECTLY to your filtered search URL
-        # This URL already includes: local filter, zoom level, and showing all pages
-        url = "https://pickleballtournaments.com/search?zoom_level=7&current_page=1&show_all=true&tournament_filter=local"
+        # 2. Go DIRECTLY to your specific local search URL
+        url = "https://pickleballtournaments.com/search?show_all=true&zoom_level=7&current_page=1&tournament_filter=local"
+        print(f"Navigating to filtered search...")
         driver.get(url)
         
-        # 3. Wait for the data to load
-        print("Landing on page... waiting for list to populate...")
-        time.sleep(8) # Generous wait time for the map/list to load
+        # 3. Wait for the results to populate
+        # We wait 8 seconds to ensure the 'skeleton' loading finishes and real text appears
+        time.sleep(8) 
 
-        # 4. Scrape the "Cards"
-        # On this specific site, tournament cards often sit in a div called 'tournament-card' or similar.
-        # We will cast a wide net to find links.
+        # 4. Scrape the Links
+        print("Scanning page for tournament links...")
         
-        found_tourneys = []
+        # We look for all links (<a> tags) on the page
+        all_links = driver.find_elements(By.TAG_NAME, "a")
         
-        # Strategy: Find all links that look like tournament details
-        # The site usually lists tournaments in <div> elements with specific classes.
-        # We'll look for the main container.
-        
-        # Attempt to find the main list items
-        # Note: Class names here are based on common structures for this platform.
-        items = driver.find_elements(By.CSS_SELECTOR, "div.search-result-item, div.tournament-card, .event-item")
-        
-        if not items:
-            # Fallback: Find all links with "tournament" in the URL
-            print("Standard containers not found, switching to Link Scan Mode...")
-            links = driver.find_elements(By.TAG_NAME, "a")
-            for link in links:
+        for link in all_links:
+            try:
                 href = link.get_attribute("href")
-                text = link.text
-                if href and "tournament" in href and len(text) > 5:
-                     # Only add if it's not a duplicate
-                    if not any(d['link'] == href for d in found_tourneys):
-                        found_tourneys.append({
-                            "name": text.split("\n")[0], # Take first line as title
-                            "date": "Check Link",
-                            "location": "Near 22030",
-                            "link": href
-                        })
-        else:
-            # If we found nice containers, parse them neatly
-            for item in items:
-                text_content = item.text.split("\n")
-                name = text_content[0]
+                text = link.text.strip()
                 
-                # Try to find the link inside this container
-                try:
-                    link_elem = item.find_element(By.TAG_NAME, "a")
-                    link = link_elem.get_attribute("href")
-                except:
-                    link = url
+                # FILTER: valid tournaments usually have "tournament/detail" in the URL
+                if href and "tournament/detail" in href:
+                    # Filter out tiny links (icons) to keep the list clean
+                    if len(text) > 3:
+                        # Deduplicate: Don't add the same tournament twice
+                        if not any(t['link'] == href for t in found_tourneys):
+                            
+                            # Clean up the name (take the first line of text)
+                            name = text.split('\n')[0]
+                            
+                            found_tourneys.append({
+                                "name": name,
+                                "link": href,
+                                "date": "Check Link", # Date is hard to auto-read, user can click link
+                                "location": "Local Search"
+                            })
+            except:
+                continue
 
-                found_tourneys.append({
-                    "name": name,
-                    "date": "Upcoming", # Date is hard to parse reliably without specific tags
-                    "location": "Local",
-                    "link": link
-                })
-
+        print(f"Scout Success: Found {len(found_tourneys)} tournaments.")
         return found_tourneys
 
     except Exception as e:
@@ -89,8 +71,6 @@ def run_scout():
         driver.quit()
 
 if __name__ == "__main__":
-    # Test run
     results = run_scout()
-    print(f"Found {len(results)} tournaments.")
     for r in results:
-        print(r)
+        print(f"- {r['name']}")
