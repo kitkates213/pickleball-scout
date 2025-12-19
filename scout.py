@@ -4,7 +4,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 
 # Try to import manager for local use
 try:
@@ -14,7 +13,7 @@ except ImportError:
     HAS_MANAGER = False
 
 def run_scout():
-    print("Starting Scout Robot (Explicit Search Mode)...")
+    print("Starting Scout Robot (User-Link Mode)...")
     
     # 1. Setup Headless Options
     options = Options()
@@ -38,30 +37,15 @@ def run_scout():
     try:
         driver = webdriver.Chrome(service=service, options=options)
         
-        # 3. Go to PickleballBrackets (The 'Clean' Database)
-        url = "https://pickleballbrackets.com/pts.aspx"
-        print(f"Navigating to: {url}")
+        # 3. Go to YOUR specific stable URL
+        url = "https://pickleballtournaments.com/search?show_all=true&zoom_level=7&current_page=1&tournament_filter=local"
         driver.get(url)
-        time.sleep(5) 
-
-        # 4. EXPLICIT SEARCH (Bypass GPS)
-        # We find the search box and type "Virginia"
-        try:
-            search_box = driver.find_element(By.ID, "txtSearch")
-            search_box.clear()
-            search_box.send_keys("Virginia")
-            search_box.send_keys(Keys.RETURN)
-            print("Typed 'Virginia' and hit Enter...")
-            time.sleep(5) # Wait for table to reload
-        except Exception as e:
-            print(f"Search Box Error: {e}")
-
-        # 5. Scrape Real Results
-        print("Scanning results...")
-        found_tourneys = []
         
-        # We look for the specific tournament cards
-        # usually class 'br-tournament-card' or links with 'ptd.aspx'
+        # 4. Wait for results to populate (10 seconds)
+        time.sleep(10) 
+
+        # 5. Scrape Links
+        found_tourneys = []
         all_links = driver.find_elements(By.TAG_NAME, "a")
         
         for link in all_links:
@@ -69,29 +53,20 @@ def run_scout():
                 href = link.get_attribute("href")
                 text = link.text.strip()
                 
-                # STRICT FILTER: 
-                # 1. Must have 'ptd.aspx' (Tournament Detail) in the link
-                # 2. Must NOT be 'Log In' or 'Sign Up'
-                if href and "ptd.aspx" in href:
-                    if len(text) > 5 and "Log In" not in text:
-                        
-                        # Deduplicate
+                # Broad Filter: Look for 'tournament' or 'event' in the URL
+                if href and ("tournament" in href or "event" in href):
+                    # Ignore tiny links or login links
+                    if len(text) > 4 and "Log In" not in text:
                         if not any(t['link'] == href for t in found_tourneys):
-                            # Clean the name (usually line 1)
-                            clean_name = text.split('\n')[0]
-                            
-                            # Optional: Filter for nearby cities if text allows
-                            # or just return all VA tournaments
                             found_tourneys.append({
-                                "name": clean_name,
+                                "name": text.split('\n')[0],
                                 "link": href,
-                                "location": "Virginia",
-                                "date": "See Details"
+                                "location": "Local",
+                                "date": "Upcoming"
                             })
             except:
                 continue
-
-        print(f"Success: Found {len(found_tourneys)} tournaments.")
+        
         return found_tourneys
 
     except Exception as e:
@@ -104,5 +79,4 @@ def run_scout():
 
 if __name__ == "__main__":
     results = run_scout()
-    for r in results:
-        print(f"- {r['name']}")
+    print(f"Found {len(results)} items.")
