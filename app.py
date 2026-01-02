@@ -11,72 +11,90 @@ st.set_page_config(page_title="Dink Lab", page_icon="🧪", layout="wide")
 conn = sqlite3.connect('pickleball_data.db', check_same_thread=False)
 c = conn.cursor()
 
-# 1. Drill Data (Added 'duration' column)
-# We use a trick to add the column if it doesn't exist yet
+# 1. Drill Data (Added 'player' column for separation)
 try:
-    c.execute("ALTER TABLE drill_stats ADD COLUMN duration INTEGER")
+    c.execute("ALTER TABLE drill_stats ADD COLUMN player TEXT")
 except:
-    pass # Column already exists
-
+    pass 
 c.execute('''CREATE TABLE IF NOT EXISTS drill_stats
              (id INTEGER PRIMARY KEY, date TEXT, drill_name TEXT, 
-              metric_value REAL, notes TEXT, duration INTEGER)''')
+              metric_value REAL, notes TEXT, duration INTEGER, player TEXT)''')
 
-# 2. Tournament Schedule
+# 2. Tournament Schedule (Added 'player' column)
+try:
+    c.execute("ALTER TABLE my_schedule ADD COLUMN player TEXT")
+except:
+    pass
 c.execute('''CREATE TABLE IF NOT EXISTS my_schedule
              (id INTEGER PRIMARY KEY, name TEXT, start_date TEXT, 
-              status TEXT, link TEXT)''')
+              status TEXT, link TEXT, player TEXT)''')
 conn.commit()
 
 # --- SIDEBAR: PLAYER PROFILE ---
 with st.sidebar:
     st.title("🧪 Dink Lab")
-    st.caption("Assistant: Active")
+    
+    # --- NEW: PLAYER SELECTOR ---
+    # This separates your data from Brad's!
+    current_user = st.selectbox("Who is training?", ["Kit", "Brad", "Guest"])
+    
     st.divider()
     
-    # Quick Profile Stats
-    df_sched = pd.read_sql_query("SELECT * FROM my_schedule WHERE status='Registered'", conn)
+    # Quick Profile Stats (Filtered by User)
+    df_sched = pd.read_sql_query("SELECT * FROM my_schedule WHERE status='Registered' AND player=?", conn, params=(current_user,))
     upcoming_count = len(df_sched)
-    st.metric("🏆 Registered Events", upcoming_count)
+    st.metric(f"{current_user}'s Events", upcoming_count)
     
-    st.info(f"**Current Level:** 3.5 - 4.0\n\n**Location:** 22030")
+    # --- DATA BACKUP (CRITICAL) ---
+    st.divider()
+    st.caption("💾 Data Management")
+    st.info("⚠️ Updates wipe data! Download backup before updating code.")
+    
+    # Export Drills
+    df_drills = pd.read_sql_query("SELECT * FROM drill_stats", conn)
+    csv_drills = df_drills.to_csv(index=False).encode('utf-8')
+    st.download_button("⬇️ Download Drill Data", csv_drills, "drills_backup.csv", "text/csv")
 
 # --- MAIN TABS ---
 tab1, tab2, tab3 = st.tabs(["🔬 The Lab (Drills)", "📅 My Manager", "🔭 The Scout"])
 
 # =========================================================
-# TAB 1: THE LAB (Now with Timer!)
+# TAB 1: THE LAB (New Metrics)
 # =========================================================
 with tab1:
-    st.header("Daily Experiments (Drills)")
+    st.header(f"Daily Experiments: {current_user}")
     
-    # --- NEW: SESSION TIMER ---
+    # --- DRILL TIMER ---
     with st.expander("⏱️ Drill Timer", expanded=False):
         t_col1, t_col2 = st.columns([1,3])
         with t_col1:
             timer_minutes = st.number_input("Set Timer (min)", min_value=1, value=20)
         with t_col2:
-            st.write(" ") # Spacer
             st.write(" ") 
-            if st.button("▶️ Start Timer"):
+            st.write(" ") 
+            b1, b2 = st.columns([1,1])
+            with b1:
+                start_timer = st.button("▶️ Start", type="primary")
+            with b2:
+                stop_timer = st.button("⏹️ Stop")
+            
+            if start_timer:
                 progress_text = "Drilling in progress... Focus!"
                 my_bar = st.progress(0, text=progress_text)
-                
                 total_seconds = timer_minutes * 60
-                
                 for i in range(total_seconds):
-                    # Update bar every second
                     percent_complete = (i + 1) / total_seconds
                     time_left = total_seconds - (i + 1)
                     mins_left = time_left // 60
                     secs_left = time_left % 60
-                    
                     my_bar.progress(percent_complete, text=f"⏳ Time Remaining: {mins_left}:{secs_left:02d}")
                     time.sleep(1)
-                
                 my_bar.empty()
-                st.success("🔔 TIME'S UP! Good work.")
+                st.success("🔔 TIME'S UP!")
                 st.balloons()
+            
+            if stop_timer:
+                st.info("Timer Stopped.")
 
     st.divider()
 
@@ -89,83 +107,39 @@ with tab1:
         )
 
     with col2:
-        # --- DRILL INSTRUCTIONS ---
+        # --- NEW COOPERATIVE METRICS ---
         if drill_type == "Dink Loyalty":
             st.subheader("🛡️ Dink Loyalty")
             st.markdown("""
-            **The Goal:** Consistency under pressure. Win the "patience war."
-            
-            **⚗️ Setup:**
-            * **You:** Kitchen Line (Left or Right)
-            * **Partner:** Kitchen Line (Cross-court from you)
-            * *Zone:* Use only half the kitchen (cross-court slice).
-            
-            **🧪 Protocol:**
-            1.  Start a dink rally cross-court.
-            2.  **RULE:** You are NOT allowed to speed up the ball.
-            3.  If you hit high/hard, you lose the point.
-            4.  You only win if *they* hit the net or out.
-            
-            **📈 Metric:** Game to 10. Did you win? (1=Yes, 0=No)
+            **Goal:** Reduce errors. A "Perfect Game" is 0 errors.
+            **Protocol:** Cross-court dinking only. No speed-ups.
+            **Metric:** How many Unforced Errors did YOU make in this game?
             """)
-            metric_label = "Did you win? (1=Win, 0=Loss)"
+            metric_label = "My Unforced Errors (Aim for 0)"
 
         elif drill_type == "Transition Reset":
             st.subheader("🧱 Transition Reset")
             st.markdown("""
-            **The Goal:** Survive the "Kill Zone" and neutralize aggressive shots.
-            
-            **⚗️ Setup:**
-            * **You:** Start at Baseline.
-            * **Partner:** Kitchen Line (with a bucket of balls).
-            
-            **🧪 Protocol:**
-            1.  Partner feeds hard, fast drives at your feet/body.
-            2.  You must hit a soft **Reset** (drop into their kitchen).
-            3.  After every successful reset, take one step forward.
-            4.  If you pop it up or miss, stay or step back.
-            5.  Goal is to make it all the way to the kitchen line.
-            
-            **📈 Metric:** Success Rate (e.g., "7" means you reset 7 out of 10 balls successfully).
+            **Goal:** Reset hard drives into the kitchen.
+            **Metric:** How many successful resets out of 10 feeds?
             """)
             metric_label = "Successful Resets (out of 10)"
 
         elif drill_type == "Drops vs Drives":
-            st.subheader("🧠 Drops vs Drives (Decision Matrix)")
+            st.subheader("🧠 Drops vs Drives")
             st.markdown("""
-            **The Goal:** Instant decision making based on ball depth.
-            
-            **⚗️ Setup:**
-            * **You:** Baseline.
-            * **Partner:** Kitchen Line.
-            
-            **🧪 Protocol:**
-            1.  Partner hits balls to you (mix of deep and short).
-            2.  **Deep Ball?** Hit a DROP (soft arc).
-            3.  **Short Ball?** Hit a DRIVE (flat/fast).
-            4.  **Scoring:** * +1 point for a correct decision AND execution.
-                * 0 points if you drive a deep ball or drop a short ball.
-            
-            **📈 Metric:** Total Score out of 20 reps.
+            **Goal:** Decision quality.
+            **Metric:** +1 point for correct choice (Drop vs Drive) AND execution.
             """)
             metric_label = "Score (Max 20)"
 
         elif drill_type == "7-11 Singles":
             st.subheader("🏃 7-11 Singles")
             st.markdown("""
-            **The Goal:** Practice closing out points at the net vs. passing shots.
-            
-            **⚗️ Setup:**
-            * **You:** Kitchen Line (The "7").
-            * **Partner:** Baseline (The "11").
-            
-            **🧪 Protocol:**
-            1.  Play out the point using full singles court (or skinny singles).
-            2.  You (at net) need to win **7 points** before your partner (at baseline) wins **11 points**.
-            
-            **📈 Metric:** Did you win? (1=Yes, 0=No)
+            **Goal:** Score points, regardless of winning.
+            **Metric:** How many points did YOU score? (If at net, aim for 7. If back, aim for 11).
             """)
-            metric_label = "Did you win? (1=Win, 0=Loss)"
+            metric_label = "Points Scored"
 
         # --- LOGGING FORM ---
         st.divider()
@@ -175,39 +149,41 @@ with tab1:
         with c2:
             duration = st.number_input("Duration (Mins)", min_value=5, step=5, value=20)
         with c3:
-            notes = st.text_input("Lab Notes", placeholder="e.g. Backhand reset felt stiff")
+            notes = st.text_input("Lab Notes", placeholder="e.g. Felt rushed")
 
-        if st.button("💾 Save Data to Lab Journal"):
-            c.execute("INSERT INTO drill_stats (date, drill_name, metric_value, notes, duration) VALUES (?, ?, ?, ?, ?)", 
-                      (date.today(), drill_type, metric, notes, duration))
+        if st.button("💾 Save Data"):
+            # Saves with the Current User Name!
+            c.execute("INSERT INTO drill_stats (date, drill_name, metric_value, notes, duration, player) VALUES (?, ?, ?, ?, ?, ?)", 
+                      (date.today(), drill_type, metric, notes, duration, current_user))
             conn.commit()
-            st.success("Entry logged!")
+            st.success(f"Entry logged for {current_user}!")
 
-    # --- PROGRESS CHART ---
+    # --- PROGRESS CHART (User Specific) ---
     st.divider()
-    st.subheader("📊 Research Findings")
-    df = pd.read_sql_query("SELECT * FROM drill_stats", conn)
+    st.subheader(f"📊 {current_user}'s Progress")
+    
+    # Filter by CURRENT USER
+    df = pd.read_sql_query("SELECT * FROM drill_stats WHERE player=?", conn, params=(current_user,))
+    
     if not df.empty:
         df['date'] = pd.to_datetime(df['date'])
-        
-        # Filter Logic
         chart_drill = st.selectbox("Select Drill to Visualize", df['drill_name'].unique())
         drill_data = df[df['drill_name'] == chart_drill]
-        
         st.line_chart(drill_data, x='date', y='metric_value')
         
-        # Show total time spent
+        # Show total time
         total_mins = drill_data['duration'].sum()
         st.caption(f"Total time spent on {chart_drill}: {total_mins} minutes")
+    else:
+        st.info(f"No data yet for {current_user}.")
 
 # =========================================================
-# TAB 2: MY MANAGER (The Assistant)
+# TAB 2: MY MANAGER
 # =========================================================
 with tab2:
-    st.header("📅 Tournament Manager")
+    st.header(f"📅 Tournament Manager: {current_user}")
     
-    # 1. ADD NEW EVENT (With Conflict Checker!)
-    with st.expander("➕ Add Tournament to Schedule", expanded=True):
+    with st.expander("➕ Add Tournament", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             new_name = st.text_input("Tournament Name")
@@ -217,52 +193,44 @@ with tab2:
             new_link = st.text_input("Link (Optional)")
             
         if st.button("Add to Schedule"):
-            # CONFLICT CHECKER
-            existing = pd.read_sql_query("SELECT * FROM my_schedule WHERE start_date=?", conn, params=(new_date,))
+            check_date = str(new_date)
+            # Check conflicts ONLY for current user
+            existing = pd.read_sql_query("SELECT * FROM my_schedule WHERE start_date=? AND player=?", conn, params=(check_date, current_user))
             
             if not existing.empty:
                 conflict_name = existing.iloc[0]['name']
-                st.warning(f"⚠️ **Conflict Detected!** You already have '{conflict_name}' scheduled for {new_date}.")
-                if st.button("Add Anyway (Ignore Conflict)"):
-                    c.execute("INSERT INTO my_schedule (name, start_date, status, link) VALUES (?, ?, ?, ?)", 
-                              (new_name, new_date, new_status, new_link))
+                st.warning(f"⚠️ Conflict: You ({current_user}) already have '{conflict_name}' on this day.")
+                if st.button("Add Anyway"):
+                    c.execute("INSERT INTO my_schedule (name, start_date, status, link, player) VALUES (?, ?, ?, ?, ?)", 
+                              (new_name, new_date, new_status, new_link, current_user))
                     conn.commit()
                     st.success(f"Added '{new_name}'!")
                     st.rerun()
             else:
-                c.execute("INSERT INTO my_schedule (name, start_date, status, link) VALUES (?, ?, ?, ?)", 
-                          (new_name, new_date, new_status, new_link))
+                c.execute("INSERT INTO my_schedule (name, start_date, status, link, player) VALUES (?, ?, ?, ?, ?)", 
+                          (new_name, new_date, new_status, new_link, current_user))
                 conn.commit()
-                st.success(f"Added '{new_name}' to your {new_status} list.")
+                st.success("Added!")
                 st.rerun()
 
-    # 2. VIEW SCHEDULE
     st.divider()
     st.subheader("My Calendar")
     
-    df_all = pd.read_sql_query("SELECT * FROM my_schedule ORDER BY start_date", conn)
+    # Fetch Data for CURRENT USER
+    df_all = pd.read_sql_query("SELECT * FROM my_schedule WHERE player=? ORDER BY start_date", conn, params=(current_user,))
     
     if not df_all.empty:
         df_all['start_date'] = pd.to_datetime(df_all['start_date']).dt.date
         today = date.today()
-        
-        # Split into Lists
         upcoming = df_all[df_all['start_date'] >= today]
         past = df_all[df_all['start_date'] < today]
         
-        # Display logic
         st.write("### 🚀 Upcoming & Wishlist")
-        if upcoming.empty:
-            st.info("No upcoming events found.")
-            
         for index, row in upcoming.iterrows():
-            # Color coding
             if row['status'] == "Registered":
                 status_icon = "🟢 REGISTERED"
-                border_color = "green" # visual cue logic
             else:
                 status_icon = "🟡 WISHLIST"
-                border_color = "yellow"
 
             with st.container(border=True):
                 col_a, col_b = st.columns([3, 1])
@@ -271,7 +239,7 @@ with tab2:
                     st.caption(f"🗓️ {row['start_date']} | {status_icon}")
                 with col_b:
                     if row['link']:
-                        st.markdown(f"[View Link]({row['link']})")
+                        st.markdown(f"[Link]({row['link']})")
                     if st.button("🗑️", key=f"del_{row['id']}"):
                         c.execute("DELETE FROM my_schedule WHERE id=?", (row['id'],))
                         conn.commit()
@@ -281,7 +249,7 @@ with tab2:
             with st.expander("📜 Past Events"):
                 st.dataframe(past[['name', 'start_date', 'status']])
     else:
-        st.info("Your schedule is empty. Add a tournament above!")
+        st.info(f"No events found for {current_user}.")
 
 # =========================================================
 # TAB 3: THE SCOUT
@@ -292,6 +260,5 @@ with tab3:
     **Status:** Robot functionality limited by cloud firewalls.
     **Protocol:** Use the Direct Uplink below to find events, then **add them to the 'My Manager' tab** to track them.
     """)
-    
     TARGET_URL = "https://pickleballtournaments.com/search?show_all=true&zoom_level=7&current_page=1&tournament_filter=local"
     st.link_button("🔗 Open Live Results (Virginia/Local)", TARGET_URL)
