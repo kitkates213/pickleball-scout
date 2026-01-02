@@ -192,4 +192,4 @@ with tab2:
             new_date = st.date_input("Date")
         with c2:
             new_status = st.selectbox("Status", ["Interested (Wishlist)", "Registered", "Completed"])
-            new_link = st.
+            new_link = st.text_input("Link (Optional)")
