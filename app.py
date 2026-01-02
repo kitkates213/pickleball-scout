@@ -11,16 +11,21 @@ st.set_page_config(page_title="Dink Lab", page_icon="🧪", layout="wide")
 conn = sqlite3.connect('pickleball_data.db', check_same_thread=False)
 c = conn.cursor()
 
-# 1. Drill Data (Added 'player' column for separation)
+# 1. Drill Data
 try:
     c.execute("ALTER TABLE drill_stats ADD COLUMN player TEXT")
 except:
     pass 
+try:
+    c.execute("ALTER TABLE drill_stats ADD COLUMN duration INTEGER")
+except:
+    pass
+
 c.execute('''CREATE TABLE IF NOT EXISTS drill_stats
              (id INTEGER PRIMARY KEY, date TEXT, drill_name TEXT, 
               metric_value REAL, notes TEXT, duration INTEGER, player TEXT)''')
 
-# 2. Tournament Schedule (Added 'player' column)
+# 2. Tournament Schedule
 try:
     c.execute("ALTER TABLE my_schedule ADD COLUMN player TEXT")
 except:
@@ -34,21 +39,20 @@ conn.commit()
 with st.sidebar:
     st.title("🧪 Dink Lab")
     
-    # --- NEW: PLAYER SELECTOR ---
-    # This separates your data from Brad's!
+    # --- PLAYER SELECTOR ---
     current_user = st.selectbox("Who is training?", ["Kit", "Brad", "Guest"])
     
     st.divider()
     
-    # Quick Profile Stats (Filtered by User)
+    # Quick Profile Stats
     df_sched = pd.read_sql_query("SELECT * FROM my_schedule WHERE status='Registered' AND player=?", conn, params=(current_user,))
     upcoming_count = len(df_sched)
     st.metric(f"{current_user}'s Events", upcoming_count)
     
-    # --- DATA BACKUP (CRITICAL) ---
+    # --- DATA BACKUP ---
     st.divider()
     st.caption("💾 Data Management")
-    st.info("⚠️ Updates wipe data! Download backup before updating code.")
+    st.info("⚠️ Updates wipe data! Download backup regularly.")
     
     # Export Drills
     df_drills = pd.read_sql_query("SELECT * FROM drill_stats", conn)
@@ -59,7 +63,7 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["🔬 The Lab (Drills)", "📅 My Manager", "🔭 The Scout"])
 
 # =========================================================
-# TAB 1: THE LAB (New Metrics)
+# TAB 1: THE LAB
 # =========================================================
 with tab1:
     st.header(f"Daily Experiments: {current_user}")
@@ -107,7 +111,7 @@ with tab1:
         )
 
     with col2:
-        # --- NEW COOPERATIVE METRICS ---
+        # --- NEW METRICS (VERIFIED) ---
         if drill_type == "Dink Loyalty":
             st.subheader("🛡️ Dink Loyalty")
             st.markdown("""
@@ -152,13 +156,12 @@ with tab1:
             notes = st.text_input("Lab Notes", placeholder="e.g. Felt rushed")
 
         if st.button("💾 Save Data"):
-            # Saves with the Current User Name!
             c.execute("INSERT INTO drill_stats (date, drill_name, metric_value, notes, duration, player) VALUES (?, ?, ?, ?, ?, ?)", 
                       (date.today(), drill_type, metric, notes, duration, current_user))
             conn.commit()
             st.success(f"Entry logged for {current_user}!")
 
-    # --- PROGRESS CHART (User Specific) ---
+    # --- PROGRESS CHART ---
     st.divider()
     st.subheader(f"📊 {current_user}'s Progress")
     
@@ -171,7 +174,6 @@ with tab1:
         drill_data = df[df['drill_name'] == chart_drill]
         st.line_chart(drill_data, x='date', y='metric_value')
         
-        # Show total time
         total_mins = drill_data['duration'].sum()
         st.caption(f"Total time spent on {chart_drill}: {total_mins} minutes")
     else:
@@ -190,75 +192,4 @@ with tab2:
             new_date = st.date_input("Date")
         with c2:
             new_status = st.selectbox("Status", ["Interested (Wishlist)", "Registered", "Completed"])
-            new_link = st.text_input("Link (Optional)")
-            
-        if st.button("Add to Schedule"):
-            check_date = str(new_date)
-            # Check conflicts ONLY for current user
-            existing = pd.read_sql_query("SELECT * FROM my_schedule WHERE start_date=? AND player=?", conn, params=(check_date, current_user))
-            
-            if not existing.empty:
-                conflict_name = existing.iloc[0]['name']
-                st.warning(f"⚠️ Conflict: You ({current_user}) already have '{conflict_name}' on this day.")
-                if st.button("Add Anyway"):
-                    c.execute("INSERT INTO my_schedule (name, start_date, status, link, player) VALUES (?, ?, ?, ?, ?)", 
-                              (new_name, new_date, new_status, new_link, current_user))
-                    conn.commit()
-                    st.success(f"Added '{new_name}'!")
-                    st.rerun()
-            else:
-                c.execute("INSERT INTO my_schedule (name, start_date, status, link, player) VALUES (?, ?, ?, ?, ?)", 
-                          (new_name, new_date, new_status, new_link, current_user))
-                conn.commit()
-                st.success("Added!")
-                st.rerun()
-
-    st.divider()
-    st.subheader("My Calendar")
-    
-    # Fetch Data for CURRENT USER
-    df_all = pd.read_sql_query("SELECT * FROM my_schedule WHERE player=? ORDER BY start_date", conn, params=(current_user,))
-    
-    if not df_all.empty:
-        df_all['start_date'] = pd.to_datetime(df_all['start_date']).dt.date
-        today = date.today()
-        upcoming = df_all[df_all['start_date'] >= today]
-        past = df_all[df_all['start_date'] < today]
-        
-        st.write("### 🚀 Upcoming & Wishlist")
-        for index, row in upcoming.iterrows():
-            if row['status'] == "Registered":
-                status_icon = "🟢 REGISTERED"
-            else:
-                status_icon = "🟡 WISHLIST"
-
-            with st.container(border=True):
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.markdown(f"**{row['name']}**")
-                    st.caption(f"🗓️ {row['start_date']} | {status_icon}")
-                with col_b:
-                    if row['link']:
-                        st.markdown(f"[Link]({row['link']})")
-                    if st.button("🗑️", key=f"del_{row['id']}"):
-                        c.execute("DELETE FROM my_schedule WHERE id=?", (row['id'],))
-                        conn.commit()
-                        st.rerun()
-
-        if not past.empty:
-            with st.expander("📜 Past Events"):
-                st.dataframe(past[['name', 'start_date', 'status']])
-    else:
-        st.info(f"No events found for {current_user}.")
-
-# =========================================================
-# TAB 3: THE SCOUT
-# =========================================================
-with tab3:
-    st.header("🔭 The Scout")
-    st.markdown("""
-    **Status:** Robot functionality limited by cloud firewalls.
-    **Protocol:** Use the Direct Uplink below to find events, then **add them to the 'My Manager' tab** to track them.
-    """)
-    TARGET_URL = "https://pickleballtournaments.com/search?show_all=true&zoom_level=7&current_page=1&tournament_filter=local"
-    st.link_button("🔗 Open Live Results (Virginia/Local)", TARGET_URL)
+            new_link = st.
