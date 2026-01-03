@@ -35,32 +35,38 @@ c.execute('''CREATE TABLE IF NOT EXISTS my_schedule
               status TEXT, link TEXT, player TEXT)''')
 conn.commit()
 
-# --- SIDEBAR: PLAYER PROFILE ---
+# --- SIDEBAR: PLAYER PROFILE & BACKUPS ---
 with st.sidebar:
     st.title("🧪 Dink Lab")
     
-    # --- PLAYER SELECTOR ---
+    # Player Selector
     current_user = st.selectbox("Who is training?", ["Kit", "Brad", "Guest"])
     
     st.divider()
     
-    # Quick Profile Stats
+    # Stats
     df_sched = pd.read_sql_query("SELECT * FROM my_schedule WHERE status='Registered' AND player=?", conn, params=(current_user,))
     upcoming_count = len(df_sched)
     st.metric(f"{current_user}'s Events", upcoming_count)
     
-    # --- DATA BACKUP ---
+    # --- DATA BACKUP SECTION ---
     st.divider()
-    st.caption("💾 Data Management")
-    st.info("⚠️ Updates wipe data! Download backup regularly.")
+    st.caption("💾 Backup & Export")
+    st.info("Download these before updating code!")
     
-    # Export Drills
+    # 1. Drills Backup
     df_drills = pd.read_sql_query("SELECT * FROM drill_stats", conn)
     csv_drills = df_drills.to_csv(index=False).encode('utf-8')
-    st.download_button("⬇️ Download Drill Data", csv_drills, "drills_backup.csv", "text/csv")
+    st.download_button("⬇️ Download Drill History", csv_drills, "drills_backup.csv", "text/csv")
+    
+    # 2. Schedule Backup
+    df_all_sched = pd.read_sql_query("SELECT * FROM my_schedule", conn)
+    csv_sched = df_all_sched.to_csv(index=False).encode('utf-8')
+    st.download_button("⬇️ Download Tournament Schedule", csv_sched, "schedule_backup.csv", "text/csv")
 
 # --- MAIN TABS ---
-tab1, tab2, tab3 = st.tabs(["🔬 The Lab (Drills)", "📅 My Manager", "🔭 The Scout"])
+# Added Tab 4 for Settings/Restore
+tab1, tab2, tab3, tab4 = st.tabs(["🔬 The Lab", "📅 Manager", "🔭 Scout", "⚙️ Settings"])
 
 # =========================================================
 # TAB 1: THE LAB
@@ -68,7 +74,7 @@ tab1, tab2, tab3 = st.tabs(["🔬 The Lab (Drills)", "📅 My Manager", "🔭 Th
 with tab1:
     st.header(f"Daily Experiments: {current_user}")
     
-    # --- DRILL TIMER ---
+    # DRILL TIMER
     with st.expander("⏱️ Drill Timer", expanded=False):
         t_col1, t_col2 = st.columns([1,3])
         with t_col1:
@@ -103,7 +109,6 @@ with tab1:
     st.divider()
 
     col1, col2 = st.columns([1, 2])
-    
     with col1:
         drill_type = st.radio(
             "Select Experiment", 
@@ -111,41 +116,28 @@ with tab1:
         )
 
     with col2:
-        # --- NEW METRICS (VERIFIED) ---
+        # METRICS
         if drill_type == "Dink Loyalty":
             st.subheader("🛡️ Dink Loyalty")
-            st.markdown("""
-            **Goal:** Reduce errors. A "Perfect Game" is 0 errors.
-            **Protocol:** Cross-court dinking only. No speed-ups.
-            **Metric:** How many Unforced Errors did YOU make in this game?
-            """)
-            metric_label = "My Unforced Errors (Aim for 0)"
+            st.markdown("**Goal:** Reduce errors. **Metric:** Unforced Errors (Aim for 0).")
+            metric_label = "My Unforced Errors"
 
         elif drill_type == "Transition Reset":
             st.subheader("🧱 Transition Reset")
-            st.markdown("""
-            **Goal:** Reset hard drives into the kitchen.
-            **Metric:** How many successful resets out of 10 feeds?
-            """)
-            metric_label = "Successful Resets (out of 10)"
+            st.markdown("**Goal:** Reset hard drives. **Metric:** Successful resets (out of 10).")
+            metric_label = "Successful Resets"
 
         elif drill_type == "Drops vs Drives":
             st.subheader("🧠 Drops vs Drives")
-            st.markdown("""
-            **Goal:** Decision quality.
-            **Metric:** +1 point for correct choice (Drop vs Drive) AND execution.
-            """)
+            st.markdown("**Goal:** Decision quality. **Metric:** +1 for correct choice & execution.")
             metric_label = "Score (Max 20)"
 
         elif drill_type == "7-11 Singles":
             st.subheader("🏃 7-11 Singles")
-            st.markdown("""
-            **Goal:** Score points, regardless of winning.
-            **Metric:** How many points did YOU score? (If at net, aim for 7. If back, aim for 11).
-            """)
+            st.markdown("**Goal:** Score points. **Metric:** Points Scored (Aim for 7 or 11).")
             metric_label = "Points Scored"
 
-        # --- LOGGING FORM ---
+        # LOGGING
         st.divider()
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -161,19 +153,15 @@ with tab1:
             conn.commit()
             st.success(f"Entry logged for {current_user}!")
 
-    # --- PROGRESS CHART ---
+    # CHART
     st.divider()
     st.subheader(f"📊 {current_user}'s Progress")
-    
-    # Filter by CURRENT USER
     df = pd.read_sql_query("SELECT * FROM drill_stats WHERE player=?", conn, params=(current_user,))
-    
     if not df.empty:
         df['date'] = pd.to_datetime(df['date'])
         chart_drill = st.selectbox("Select Drill to Visualize", df['drill_name'].unique())
         drill_data = df[df['drill_name'] == chart_drill]
         st.line_chart(drill_data, x='date', y='metric_value')
-        
         total_mins = drill_data['duration'].sum()
         st.caption(f"Total time spent on {chart_drill}: {total_mins} minutes")
     else:
@@ -193,3 +181,120 @@ with tab2:
         with c2:
             new_status = st.selectbox("Status", ["Interested (Wishlist)", "Registered", "Completed"])
             new_link = st.text_input("Link (Optional)")
+            
+        if st.button("Add to Schedule"):
+            check_date = str(new_date)
+            existing = pd.read_sql_query("SELECT * FROM my_schedule WHERE start_date=? AND player=?", conn, params=(check_date, current_user))
+            
+            if not existing.empty:
+                conflict_name = existing.iloc[0]['name']
+                st.warning(f"⚠️ Conflict: You ({current_user}) already have '{conflict_name}' on this day.")
+                if st.button("Add Anyway"):
+                    c.execute("INSERT INTO my_schedule (name, start_date, status, link, player) VALUES (?, ?, ?, ?, ?)", 
+                              (new_name, new_date, new_status, new_link, current_user))
+                    conn.commit()
+                    st.success(f"Added '{new_name}'!")
+                    st.rerun()
+            else:
+                c.execute("INSERT INTO my_schedule (name, start_date, status, link, player) VALUES (?, ?, ?, ?, ?)", 
+                          (new_name, new_date, new_status, new_link, current_user))
+                conn.commit()
+                st.success("Added!")
+                st.rerun()
+
+    st.divider()
+    st.subheader("My Calendar")
+    df_all = pd.read_sql_query("SELECT * FROM my_schedule WHERE player=? ORDER BY start_date", conn, params=(current_user,))
+    
+    if not df_all.empty:
+        df_all['start_date'] = pd.to_datetime(df_all['start_date']).dt.date
+        today = date.today()
+        upcoming = df_all[df_all['start_date'] >= today]
+        past = df_all[df_all['start_date'] < today]
+        
+        st.write("### 🚀 Upcoming & Wishlist")
+        for index, row in upcoming.iterrows():
+            status_icon = "🟢 REGISTERED" if row['status'] == "Registered" else "🟡 WISHLIST"
+            with st.container(border=True):
+                col_a, col_b = st.columns([3, 1])
+                with col_a:
+                    st.markdown(f"**{row['name']}**")
+                    st.caption(f"🗓️ {row['start_date']} | {status_icon}")
+                with col_b:
+                    if row['link']:
+                        st.markdown(f"[Link]({row['link']})")
+                    if st.button("🗑️", key=f"del_{row['id']}"):
+                        c.execute("DELETE FROM my_schedule WHERE id=?", (row['id'],))
+                        conn.commit()
+                        st.rerun()
+
+        if not past.empty:
+            with st.expander("📜 Past Events"):
+                st.dataframe(past[['name', 'start_date', 'status']])
+    else:
+        st.info(f"No events found for {current_user}.")
+
+# =========================================================
+# TAB 3: THE SCOUT
+# =========================================================
+with tab3:
+    st.header("🔭 The Scout")
+    st.markdown("""
+    **Status:** Robot functionality limited by cloud firewalls.
+    **Protocol:** Use the Direct Uplink below to find events, then **add them to the 'My Manager' tab** to track them.
+    """)
+    TARGET_URL = "https://pickleballtournaments.com/search?show_all=true&zoom_level=7&current_page=1&tournament_filter=local"
+    st.link_button("🔗 Open Live Results (Virginia/Local)", TARGET_URL)
+
+# =========================================================
+# TAB 4: SETTINGS (RESTORE DATA)
+# =========================================================
+with tab4:
+    st.header("⚙️ Data Settings & Restore")
+    st.write("Use this screen to reload your data after an app update.")
+    
+    st.divider()
+    
+    # --- RESTORE DRILLS ---
+    st.subheader("1. Restore Drill History")
+    uploaded_drills = st.file_uploader("Upload 'drills_backup.csv'", type="csv")
+    
+    if uploaded_drills is not None:
+        if st.button("🔄 Process Drill Restore"):
+            try:
+                # Read CSV
+                df_restore = pd.read_csv(uploaded_drills)
+                
+                # Clean: Drop the old 'id' column if it exists (let the new DB generate new IDs)
+                if 'id' in df_restore.columns:
+                    df_restore = df_restore.drop(columns=['id'])
+                
+                # Insert into DB
+                df_restore.to_sql('drill_stats', conn, if_exists='append', index=False)
+                st.success(f"Success! Restored {len(df_restore)} drill entries.")
+                st.balloons()
+            except Exception as e:
+                st.error(f"Error restoring drills: {e}")
+
+    st.divider()
+
+    # --- RESTORE SCHEDULE ---
+    st.subheader("2. Restore Tournament Schedule")
+    uploaded_sched = st.file_uploader("Upload 'schedule_backup.csv'", type="csv")
+    
+    if uploaded_sched is not None:
+        if st.button("🔄 Process Schedule Restore"):
+            try:
+                # Read CSV
+                df_restore_sched = pd.read_csv(uploaded_sched)
+                
+                # Clean: Drop 'id' column
+                if 'id' in df_restore_sched.columns:
+                    df_restore_sched = df_restore_sched.drop(columns=['id'])
+                
+                # Insert into DB
+                df_restore_sched.to_sql('my_schedule', conn, if_exists='append', index=False)
+                st.success(f"Success! Restored {len(df_restore_sched)} tournament events.")
+                st.balloons()
+            except Exception as e:
+                st.error(f"Error restoring schedule: {e}")
